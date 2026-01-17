@@ -10,13 +10,19 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class BowG129PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """
-    PPO Runner configuration for G1 standing balance task.
+    PPO Runner configuration for G1 bowing motion task.
 
-    Observation space: 42 dims (ang_vel, gravity, leg_pos, leg_vel, last_action)
+    Observation space: 43 dims
+      - ang_vel (3)
+      - gravity (3)
+      - bow_command (1)
+      - leg_pos (12)
+      - leg_vel (12)
+      - last_action (12)
+
     Action space: 12 dims (12 leg joints)
 
-    This configuration is optimized for learning standing balance
-    with potential extension to bowing motion.
+    The policy learns to track commanded bow angles using hip_pitch.
     """
 
     # Training parameters

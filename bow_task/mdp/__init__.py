@@ -20,7 +20,14 @@ from .observations import (
     get_leg_joint_positions,
     get_leg_joint_velocities,
     get_last_action,
+    get_bow_angle_command,
     LEG_JOINT_NAMES,
+)
+
+# Import command generators
+from .commands import (
+    BowAngleCommand,
+    BowAngleCommandCfg,
 )
 
 # Import custom reward functions
@@ -31,7 +38,9 @@ from .rewards import (
     compute_joint_default_reward,
     compute_alive_reward,
     # Phase 2: Bowing motion rewards
-    compute_bow_reward,
+    compute_bow_angle_tracking_reward,
+    compute_symmetric_leg_reward,
+    compute_bow_reward,  # Legacy
 )
 
 # Import custom termination functions

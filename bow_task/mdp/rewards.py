@@ -132,8 +132,107 @@ def compute_joint_default_reward(
 
 
 # =============================================================================
-# Phase 2: Bowing Motion Rewards (for future use)
+# Phase 2: Bowing Motion Rewards
 # =============================================================================
+
+def compute_bow_angle_tracking_reward(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "bow_angle",
+) -> torch.Tensor:
+    """
+    Reward for tracking the commanded bow angle using upper body tilt.
+
+    Uses projected_gravity to measure actual upper body orientation.
+    When upright: projected_gravity_b = [0, 0, -1]
+    When bowed forward by angle θ: projected_gravity_b ≈ [sin(θ), 0, -cos(θ)]
+
+    Args:
+        env: The environment
+        robot_cfg: Robot configuration
+        command_name: Name of the command to track
+
+    Returns:
+        torch.Tensor: Tracking reward [num_envs]
+    """
+    robot: Articulation = env.scene[robot_cfg.name]
+
+    # Get commanded bow angle
+    command = env.command_manager.get_command(command_name)
+    target_angle = command[:, 0]  # [num_envs]
+
+    # Get current upper body orientation from projected gravity
+    projected_gravity = robot.data.projected_gravity_b
+
+    # Target gravity vector for the desired bow angle
+    # Forward bow: positive x component, negative z component
+    target_gravity_x = torch.sin(target_angle)
+    target_gravity_z = -torch.cos(target_angle)
+
+    # Current gravity components
+    current_gravity_x = projected_gravity[:, 0]
+    current_gravity_z = projected_gravity[:, 2]
+
+    # Error in gravity vector (measures actual upper body tilt)
+    error_x = current_gravity_x - target_gravity_x
+    error_z = current_gravity_z - target_gravity_z
+    total_error = torch.sqrt(error_x**2 + error_z**2)
+
+    # Also penalize sideways tilt (y component should be near 0)
+    sideways_error = torch.abs(projected_gravity[:, 1])
+
+    # Combined error
+    combined_error = total_error + 0.5 * sideways_error
+
+    # Exponential reward
+    reward = torch.exp(-5.0 * combined_error)
+
+    return reward
+
+
+def compute_symmetric_leg_reward(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Reward for maintaining symmetric leg movement.
+
+    Encourages left and right legs to move together during bowing.
+
+    Returns:
+        torch.Tensor: Symmetry reward [num_envs]
+    """
+    robot: Articulation = env.scene[robot_cfg.name]
+    joint_names = robot.data.joint_names
+    joint_pos = robot.data.joint_pos
+
+    # Pairs of joints that should be symmetric
+    symmetric_pairs = [
+        ("left_hip_pitch_joint", "right_hip_pitch_joint"),
+        ("left_hip_roll_joint", "right_hip_roll_joint"),
+        ("left_knee_joint", "right_knee_joint"),
+        ("left_ankle_pitch_joint", "right_ankle_pitch_joint"),
+    ]
+
+    total_asymmetry = torch.zeros(env.num_envs, device=env.device)
+
+    for left_name, right_name in symmetric_pairs:
+        left_idx = joint_names.index(left_name) if left_name in joint_names else None
+        right_idx = joint_names.index(right_name) if right_name in joint_names else None
+
+        if left_idx is not None and right_idx is not None:
+            # For roll joints, they should be opposite (left positive = right negative)
+            if "roll" in left_name:
+                asymmetry = torch.abs(joint_pos[:, left_idx] + joint_pos[:, right_idx])
+            else:
+                asymmetry = torch.abs(joint_pos[:, left_idx] - joint_pos[:, right_idx])
+            total_asymmetry += asymmetry
+
+    # Exponential reward (higher when more symmetric)
+    reward = torch.exp(-2.0 * total_asymmetry)
+
+    return reward
+
 
 def compute_bow_reward(
     env: ManagerBasedRLEnv,

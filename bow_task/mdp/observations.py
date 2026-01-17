@@ -215,3 +215,15 @@ def get_last_action(
         torch.Tensor: Last action [num_envs, num_actions]
     """
     return env.action_manager.action
+
+
+def get_bow_angle_command(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """
+    Get the current bow angle command.
+
+    Returns:
+        torch.Tensor: Bow angle command [num_envs, 1]
+    """
+    return env.command_manager.get_command("bow_angle")

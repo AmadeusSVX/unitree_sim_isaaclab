@@ -51,20 +51,30 @@ class BowSceneCfg(InteractiveSceneCfg):
     )
 
     # G1 Robot - use the wholebody configuration
+    # Arms are fixed in extended (straight) position
     robot: ArticulationCfg = G129_CFG_WITH_DEX1_WHOLEBODY.replace(
         prim_path="/World/envs/env_.*/Robot",
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.80),
             rot=(1.0, 0.0, 0.0, 0.0),
             joint_pos={
+                # Leg joints (controlled by policy)
                 ".*_hip_pitch_joint": -0.20,
                 ".*_knee_joint": 0.42,
                 ".*_ankle_pitch_joint": -0.23,
-                ".*_elbow_joint": 0.87,
-                "left_shoulder_roll_joint": 0.18,
-                "left_shoulder_pitch_joint": 0.35,
-                "right_shoulder_roll_joint": -0.18,
-                "right_shoulder_pitch_joint": 0.35,
+                # Arm joints (fixed - extended, slightly away from body)
+                ".*_elbow_joint": 0.0,              # Straight elbow
+                ".*_shoulder_pitch_joint": 0.0,     # Arms down
+                "left_shoulder_roll_joint": 0.2,    # Left arm away from body
+                "right_shoulder_roll_joint": -0.2,  # Right arm away from body
+                ".*_shoulder_yaw_joint": 0.0,       # No rotation
+                ".*_wrist_roll_joint": 0.0,         # Straight wrist
+                ".*_wrist_pitch_joint": 0.0,
+                ".*_wrist_yaw_joint": 0.0,
+                # Waist (fixed)
+                "waist_yaw_joint": 0.0,
+                "waist_roll_joint": 0.0,
+                "waist_pitch_joint": 0.0,
             },
             joint_vel={".*": 0.0},
         ),
@@ -101,8 +111,21 @@ class ActionsCfg:
 
 
 @configclass
+class CommandsCfg:
+    """Command configuration for bow angle with smooth transitions."""
+    bow_angle = mdp.BowAngleCommandCfg(
+        resampling_time_range=(4.0, 6.0),  # Resample target every 4-6 seconds
+        ranges=mdp.BowAngleCommandCfg.Ranges(
+            min_angle=0.0,   # Standing (no bow)
+            max_angle=0.25,  # Maximum bow angle (~15 degrees)
+        ),
+        smoothing_alpha=0.02,  # Smooth transition (~50 steps to 63% of target)
+    )
+
+
+@configclass
 class ObservationsCfg:
-    """Observation configuration - policy.onnx compatible format."""
+    """Observation configuration with bow angle command."""
 
     @configclass
     class PolicyCfg(ObsGroup):
@@ -110,6 +133,8 @@ class ObservationsCfg:
         ang_vel = ObsTerm(func=mdp.get_base_angular_velocity)
         # Projected gravity (3)
         projected_gravity = ObsTerm(func=mdp.get_base_orientation)
+        # Bow angle command (1)
+        bow_command = ObsTerm(func=mdp.get_bow_angle_command)
         # Leg joint positions relative to default (12)
         leg_joint_pos = ObsTerm(func=mdp.get_leg_joint_positions)
         # Leg joint velocities (12)
@@ -126,24 +151,27 @@ class ObservationsCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward configuration for Phase 1: Standing Balance."""
-    # Main balance rewards
-    upright = RewTerm(
-        func=mdp.compute_upright_reward,
-        weight=1.0
+    """Reward configuration for bowing motion with command tracking."""
+    # Main reward: Track commanded bow angle (uses projected_gravity)
+    bow_tracking = RewTerm(
+        func=mdp.compute_bow_angle_tracking_reward,
+        weight=2.0,
+        params={"command_name": "bow_angle"}
     )
+    # Balance: keep base velocity low (don't fall over)
     base_stability = RewTerm(
         func=mdp.compute_base_stability_reward,
         weight=0.5
     )
-    joint_default = RewTerm(
-        func=mdp.compute_joint_default_reward,
+    # Symmetry reward (legs should move together)
+    symmetry = RewTerm(
+        func=mdp.compute_symmetric_leg_reward,
         weight=0.3
     )
     # Survival reward
     alive_bonus = RewTerm(
         func=mdp.compute_alive_reward,
-        weight=0.2
+        weight=0.3
     )
     # Action smoothness penalty
     action_rate = RewTerm(
@@ -189,11 +217,11 @@ class BowG129EnvCfg(ManagerBasedRLEnvCfg):
 
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
+    commands: CommandsCfg = CommandsCfg()
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
 
-    commands = None
     curriculum = None
 
     def __post_init__(self):
